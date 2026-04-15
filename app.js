@@ -840,7 +840,19 @@ function exportToXlsx() {
             ('0' + now.getMinutes()).slice(-2);
         var fileName = 'Sapo_Import_' + dateStr + '.xlsx';
 
-        XLSX.writeFile(wb, fileName);
+        // Use Blob-based download for maximum browser compatibility
+        var wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+        var blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 100);
         showToast('Đã xuất file ' + fileName + ' thành công!', 'success');
     } catch (err) {
         console.error('Export error:', err);
