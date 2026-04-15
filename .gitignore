@@ -1,4 +1,9 @@
 test_cukcuk.xlsx
+sapo_template.xlsx
+test_compare.js
 node_modules/
+.wrangler/
+package.json
+package-lock.json
 .DS_Store
 Thumbs.db

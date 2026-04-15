@@ -3,12 +3,14 @@
  * 
  * This application reads CukCuk invoice files (Excel/CSV) and converts them
  * to the Sapo e-invoice format for import.
+ * 
+ * Sapo format: 35 columns (A-AI), 3 header rows + data rows
  */
 
 // ============================================
 // State Management
 // ============================================
-const AppState = {
+var AppState = {
     files: [],           // Uploaded file objects
     invoices: [],        // Parsed CukCuk invoices
     sapoData: [],        // Converted Sapo data rows
@@ -16,78 +18,118 @@ const AppState = {
 };
 
 // ============================================
-// Sapo Column Definitions (36 columns)
+// Sapo Column Definitions (35 columns, A-AI)
+// Mapped exactly from Sapo template analysis
 // ============================================
-const SAPO_HEADERS = {
+var SAPO_HEADERS = {
+    // Row 1 (header group names)
     row1: [
-        'Ký hiệu*', 'Mã chứng từ gốc', 'Thông tin người mua', '', '', '', '', '', '',
-        'Thông tin người nhận', '',
-        'Thông tin giao dịch', '', '', '', '',
-        'Chiết khấu cả hóa đơn', '',
-        'Thuế GTGT cả hóa đơn (%)',
-        'Thông tin hàng hóa, dịch vụ', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''
+        'Ký hiệu*',                     // A (col 0)
+        'Mã chứng từ gốc',              // B (col 1)
+        'Thông tin người mua',           // C (col 2) - spans to I
+        '', '', '', '', '', '',          // D-I (cols 3-8) merged with C
+        'Thông tin người nhận',          // J (col 9) - spans to K
+        '',                              // K (col 10) merged with J
+        'Thông tin giao dịch',           // L (col 11) - spans to P
+        '', '', '', '',                  // M-P (cols 12-15) merged with L
+        'Chiết khấu cả hóa đơn',        // Q (col 16) - spans to R
+        '',                              // R (col 17) merged with Q
+        'Thuế GTGT cả hóa đơn (%)',     // S (col 18) standalone
+        'Thông tin hàng hóa, dịch vụ',  // T (col 19) - spans to AI
+        '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '' // U-AI (cols 20-34)
     ],
+    // Row 2 (sub-column names)
     row2: [
-        '', '', 'Mã khách', 'Mã số thuế người mua', 'Tên đơn vị', 'Địa chỉ',
-        'Người mua hàng', 'Số điện thoại', 'Email',
-        'Tên người nhận hóa đơn', 'Email nhận hóa đơn',
-        'Hình thức thanh toán*', 'Tên ngân hàng', 'Số tài khoản ngân hàng', 'Loại tiền', 'Tỷ giá',
-        '', '', '',
-        '', 'Tính chất', 'Mã hàng', 'Tên hàng hóa/dịch vụ', 'ĐVT', 'Số lượng', 'Đơn giá',
-        'Thành tiền', 'Chiết khấu/SP', '', 'Tiền chiết khấu', '%Tính thuế',
-        'Thành tiền đã trừ chiết khấu', 'Tiền thuế GTGT được giảm', 'Thuế GTGT (%)',
-        'Tiền thuế GTGT', 'Tổng tiền'
+        '',                              // A (col 0) - merged from row 1
+        '',                              // B (col 1) - merged from row 1
+        'Mã khách',                      // C (col 2)
+        'Mã số thuế người mua',          // D (col 3)
+        'Tên đơn vị',                    // E (col 4)
+        'Địa chỉ',                       // F (col 5)
+        'Người mua hàng',                // G (col 6)
+        'Số điện thoại',                 // H (col 7)
+        'Email',                         // I (col 8)
+        'Tên người nhận hóa đơn',        // J (col 9)
+        'Email nhận hóa đơn',            // K (col 10)
+        'Hình thức thanh toán*',         // L (col 11)
+        'Tên ngân hàng',                 // M (col 12)
+        'Số tài khoản ngân hàng',        // N (col 13)
+        'Loại tiền',                     // O (col 14)
+        'Tỷ giá',                        // P (col 15)
+        '',                              // Q (col 16) - merged from row 1
+        '',                              // R (col 17) - merged from row 1
+        '',                              // S (col 18) - merged from row 1
+        'Tính chất',                     // T (col 19)
+        'Mã hàng',                       // U (col 20)
+        'Tên hàng hóa/dịch vụ',         // V (col 21)
+        'ĐVT',                          // W (col 22)
+        'Số lượng',                      // X (col 23)
+        'Đơn giá',                       // Y (col 24)
+        'Thành tiền',                    // Z (col 25)
+        'Chiết khấu/SP',                // AA (col 26) - spans to AB
+        '',                              // AB (col 27) merged with AA
+        'Tiền chiết khấu',              // AC (col 28)
+        '%Tính thuế',                    // AD (col 29)
+        'Thành tiền đã trừ chiết khấu', // AE (col 30)
+        'Tiền thuế GTGT được giảm',     // AF (col 31)
+        'Thuế GTGT (%)',                 // AG (col 32)
+        'Tiền thuế GTGT',               // AH (col 33)
+        'Tổng tiền'                      // AI (col 34)
     ],
+    // Row 3 (sub-sub headers for discount columns)
     row3: [
-        '', '', '', '', '', '', '', '', '',
-        '', '',
-        '', '', '', '', '',
-        'Giá trị', '%', '',
-        '', '', '', '', '', '', '',
-        '', 'Giá trị', '%', '', '',
-        '', '', '', '', ''
+        '', '', '', '', '', '', '', '', '', // A-I (cols 0-8)
+        '', '',                             // J-K (cols 9-10)
+        '', '', '', '', '',                 // L-P (cols 11-15)
+        'Giá trị', '%',                    // Q-R (cols 16-17)
+        '',                                 // S (col 18)
+        '', '', '', '', '', '', '',         // T-Z (cols 19-25)
+        'Giá trị', '%',                    // AA-AB (cols 26-27)
+        '', '', '', '', '', '', ''          // AC-AI (cols 28-34)
     ]
 };
 
-// Column indices for Sapo format
-const SAPO_COL = {
-    KY_HIEU: 0,
-    MA_CHUNG_TU: 1,
-    MA_KHACH: 2,
-    MA_SO_THUE: 3,
-    TEN_DON_VI: 4,
-    DIA_CHI: 5,
-    NGUOI_MUA: 6,
-    SDT: 7,
-    EMAIL: 8,
-    NGUOI_NHAN: 9,
-    EMAIL_NHAN: 10,
-    HINH_THUC_TT: 11,
-    NGAN_HANG: 12,
-    SO_TK: 13,
-    LOAI_TIEN: 14,
-    TY_GIA: 15,
-    CK_GIA_TRI: 16,
-    CK_PHAN_TRAM: 17,
-    THUE_GTGT_HD: 18,
-    SPACER: 19,
-    TINH_CHAT: 20,
-    MA_HANG: 21,
-    TEN_HANG: 22,
-    DVT: 23,
-    SO_LUONG: 24,
-    DON_GIA: 25,
-    THANH_TIEN: 26,
-    CK_SP_GIA_TRI: 27,
-    CK_SP_PHAN_TRAM: 28,
-    TIEN_CHIET_KHAU: 29,
-    PHAN_TRAM_THUE: 30,
-    THANH_TIEN_DA_TRU: 31,
-    THUE_GTGT_GIAM: 32,
-    THUE_GTGT_PCT: 33,
-    TIEN_THUE_GTGT: 34,
-    TONG_TIEN: 35
+// Column indices for Sapo format (35 columns, 0-indexed)
+var SAPO_COL = {
+    KY_HIEU: 0,           // A - Ký hiệu*
+    MA_CHUNG_TU: 1,        // B - Mã chứng từ gốc
+    MA_KHACH: 2,           // C - Mã khách
+    MA_SO_THUE: 3,         // D - Mã số thuế người mua
+    TEN_DON_VI: 4,         // E - Tên đơn vị
+    DIA_CHI: 5,            // F - Địa chỉ
+    NGUOI_MUA: 6,          // G - Người mua hàng
+    SDT: 7,                // H - Số điện thoại
+    EMAIL: 8,              // I - Email
+    NGUOI_NHAN: 9,         // J - Tên người nhận hóa đơn
+    EMAIL_NHAN: 10,        // K - Email nhận hóa đơn
+    HINH_THUC_TT: 11,     // L - Hình thức thanh toán*
+    NGAN_HANG: 12,         // M - Tên ngân hàng
+    SO_TK: 13,             // N - Số tài khoản ngân hàng
+    LOAI_TIEN: 14,         // O - Loại tiền
+    TY_GIA: 15,            // P - Tỷ giá
+    CK_GIA_TRI: 16,        // Q - Chiết khấu cả HĐ - Giá trị
+    CK_PHAN_TRAM: 17,      // R - Chiết khấu cả HĐ - %
+    THUE_GTGT_HD: 18,      // S - Thuế GTGT cả hóa đơn (%)
+    TINH_CHAT: 19,         // T - Tính chất
+    MA_HANG: 20,           // U - Mã hàng
+    TEN_HANG: 21,          // V - Tên hàng hóa/dịch vụ
+    DVT: 22,               // W - ĐVT
+    SO_LUONG: 23,          // X - Số lượng
+    DON_GIA: 24,           // Y - Đơn giá
+    THANH_TIEN: 25,        // Z - Thành tiền
+    CK_SP_GIA_TRI: 26,    // AA - Chiết khấu/SP - Giá trị
+    CK_SP_PHAN_TRAM: 27,  // AB - Chiết khấu/SP - %
+    TIEN_CHIET_KHAU: 28,  // AC - Tiền chiết khấu
+    PHAN_TRAM_THUE: 29,   // AD - %Tính thuế
+    THANH_TIEN_DA_TRU: 30, // AE - Thành tiền đã trừ chiết khấu
+    THUE_GTGT_GIAM: 31,   // AF - Tiền thuế GTGT được giảm
+    THUE_GTGT_PCT: 32,    // AG - Thuế GTGT (%)
+    TIEN_THUE_GTGT: 33,   // AH - Tiền thuế GTGT
+    TONG_TIEN: 34         // AI - Tổng tiền
 };
+
+// Total columns
+var TOTAL_COLS = 35;
 
 // ============================================
 // Initialization
@@ -271,8 +313,6 @@ function onAllFilesProcessed() {
 function parseCukCukSheet(data, fileName, sheetName) {
     var invoices = [];
 
-    // Find all invoice blocks in the sheet
-    // Each invoice starts with a row containing "Hóa đơn" or a row with "Số:" pattern
     var i = 0;
     while (i < data.length) {
         var row = data[i];
@@ -291,10 +331,9 @@ function parseCukCukSheet(data, fileName, sheetName) {
         }
 
         // Also check for invoice blocks that start with "Số:" directly
-        if (i < data.length && row.length > 1) {
-            var secondCell = String(row[0] || '') + ' ' + String(row[1] || '');
-            if (secondCell.indexOf('Số:') !== -1) {
-                // Check if the previous row might be the "Hóa đơn" header that we missed
+        if (row.length > 0) {
+            var cellStr = String(row[0] || '');
+            if (cellStr.indexOf('Số:') !== -1 || cellStr.indexOf('Số :') !== -1) {
                 var invoice = parseInvoiceBlock(data, Math.max(0, i - 1));
                 if (invoice) {
                     invoice.fileName = fileName;
@@ -309,10 +348,12 @@ function parseCukCukSheet(data, fileName, sheetName) {
         i++;
     }
 
-    // If no invoices found with headers, try parsing the whole sheet as a single invoice
+    // If no invoices found, try parsing the whole sheet as one
     if (invoices.length === 0 && data.length > 5) {
-        var invoice = tryParseWholeSheet(data, fileName, sheetName);
+        var invoice = parseInvoiceBlock(data, 0);
         if (invoice) {
+            invoice.fileName = fileName;
+            invoice.sheetName = sheetName;
             invoices.push(invoice);
         }
     }
@@ -347,20 +388,19 @@ function parseInvoiceBlock(data, startRow) {
         var row = data[i];
         var rowStr = row.map(function (c) { return String(c || '').trim(); }).join(' ');
 
-        // Parse header info
+        // Parse header info before items table
         if (!foundItems) {
-            // Parse "Số: xxx, Ngày: xxx, Thu ngân: xxx"
             parseInfoRow(row, invoice);
         }
 
-        // Check for item table header row (STT, Tên món, ĐVT, ...)
+        // Check for item table header row
         if (isItemHeaderRow(row)) {
             foundItems = true;
             i++;
             continue;
         }
 
-        // Parse item rows (numbered rows after header)
+        // Parse item rows
         if (foundItems) {
             var firstCell = String(row[0] || '').trim();
             var isNumber = /^\d+$/.test(firstCell);
@@ -370,32 +410,18 @@ function parseInvoiceBlock(data, startRow) {
                 if (item) {
                     invoice.items.push(item);
                 }
-            } else if (rowStr.indexOf('Tổng tiền thanh toán') !== -1 || rowStr.indexOf('Tổng tiền') !== -1) {
-                // Parse total
+            }
+
+            // Parse total
+            if (rowStr.indexOf('Tổng tiền thanh toán') !== -1 || 
+                (rowStr.indexOf('Tổng tiền') !== -1 && rowStr.indexOf('thanh toán') !== -1)) {
                 invoice.totalAmount = findNumberInRow(row);
             }
 
-            // Parse payment method rows
-            if (rowStr.indexOf('Tiền mặt:') !== -1 || rowStr.indexOf('Tiền mặt :') !== -1) {
-                var cashAmount = extractPaymentAmount(row, 'Tiền mặt');
-                if (cashAmount > 0) {
-                    invoice.paymentMethods.push({ method: 'Tiền mặt', amount: cashAmount });
-                }
-            }
-            if (rowStr.indexOf('Chuyển khoản:') !== -1 || rowStr.indexOf('Chuyển khoản :') !== -1) {
-                var transferAmount = extractPaymentAmount(row, 'Chuyển khoản');
-                if (transferAmount > 0) {
-                    invoice.paymentMethods.push({ method: 'Chuyển khoản', amount: transferAmount });
-                }
-            }
-            if (rowStr.indexOf('Thẻ:') !== -1 || rowStr.indexOf('Thẻ :') !== -1) {
-                var cardAmount = extractPaymentAmount(row, 'Thẻ');
-                if (cardAmount > 0) {
-                    invoice.paymentMethods.push({ method: 'Thẻ', amount: cardAmount });
-                }
-            }
+            // Parse payment methods
+            parsePaymentRow(row, rowStr, invoice);
 
-            // Check for end of invoice block (empty rows or next invoice)
+            // Check for end of invoice
             if (isEndOfInvoice(data, i, startRow)) {
                 invoice._endRow = i;
                 break;
@@ -406,10 +432,9 @@ function parseInvoiceBlock(data, startRow) {
         i++;
     }
 
-    // Only return if we found actual items
     if (invoice.items.length === 0) return null;
 
-    // Determine payment method if not found in footer
+    // Default payment method
     if (invoice.paymentMethods.length === 0 && invoice.totalAmount > 0) {
         invoice.paymentMethods.push({ method: 'Tiền mặt', amount: invoice.totalAmount });
     }
@@ -418,72 +443,98 @@ function parseInvoiceBlock(data, startRow) {
 }
 
 function parseInfoRow(row, invoice) {
-    var rowStr = row.map(function (c) { return String(c || ''); }).join('|||');
+    // Process each cell individually for more reliable parsing
+    for (var i = 0; i < row.length; i++) {
+        var cell = String(row[i] || '').trim();
+        if (!cell) continue;
 
-    // Parse invoice number: "Số: 2602000218"
-    var numMatch = rowStr.match(/Số[:\s]*\s*([A-Z0-9]+)/i);
-    if (numMatch) invoice.number = numMatch[1].trim();
-
-    // Parse date: "Ngày: 01/04/2026 (18:23 - 19:21)"
-    var dateMatch = rowStr.match(/Ngày[:\s]*\s*(\d{1,2}\/\d{1,2}\/\d{2,4})/);
-    if (dateMatch) invoice.date = dateMatch[1].trim();
-
-    var timeMatch = rowStr.match(/\((\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2})\)/);
-    if (timeMatch) invoice.timeRange = timeMatch[1].trim();
-
-    // Parse cashier: "Thu ngân: THU NGÂN"
-    var cashierMatch = rowStr.match(/Thu ngân[:\s]*\s*([^|]+)/i);
-    if (cashierMatch) invoice.cashier = cashierMatch[1].trim();
-
-    // Parse server: "Phục vụ: Nguyễn Văn Hoà"
-    var serverMatch = rowStr.match(/Phục vụ[:\s]*\s*([^|]+)/i);
-    if (serverMatch) invoice.server = serverMatch[1].trim();
-
-    // Parse table: "Bàn: A.18"
-    var tableMatch = rowStr.match(/Bàn[:\s]*\s*([^|]+)/i);
-    if (tableMatch) invoice.table = tableMatch[1].trim();
-
-    // Parse guest count: "Số người: 3"
-    var guestMatch = rowStr.match(/Số người[:\s]*\s*(\d+)/i);
-    if (guestMatch) invoice.guestCount = guestMatch[1].trim();
-
-    // Parse customer: "KH: xxx"
-    var customerMatch = rowStr.match(/KH[:\s]*\s*([^|]*)/i);
-    if (customerMatch) {
-        var name = customerMatch[1].trim();
-        if (name && name !== 'KH:' && name !== '') {
-            invoice.customerName = name;
+        // Parse invoice number: "Số: 2602000218" or "Số : 2602000218"
+        // Must NOT match "Số người:"
+        if (cell.indexOf('Số:') !== -1 || cell.indexOf('Số :') !== -1) {
+            if (cell.indexOf('Số người') === -1) {
+                var colonIdx = cell.indexOf(':');
+                if (colonIdx !== -1) {
+                    var afterColon = cell.substring(colonIdx + 1).trim();
+                    if (afterColon && /[A-Za-z0-9]/.test(afterColon)) {
+                        invoice.number = afterColon;
+                    }
+                }
+            }
         }
-    }
 
-    // Parse phone: "ĐT: xxx"
-    var phoneMatch = rowStr.match(/ĐT[:\s]*\s*([^|]*)/i);
-    if (phoneMatch) {
-        var phone = phoneMatch[1].trim();
-        if (phone && phone !== 'ĐT:' && phone !== '' && /\d/.test(phone)) {
-            invoice.customerPhone = phone;
+        // Parse date: "Ngày: 01/04/2026 (18:23 - 19:21)"
+        if (cell.indexOf('Ngày') !== -1 || cell.indexOf('Ngày') !== -1) {
+            var dateMatch = cell.match(/(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+            if (dateMatch) invoice.date = dateMatch[1];
+
+            var timeMatch = cell.match(/\((\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2})\)/);
+            if (timeMatch) invoice.timeRange = timeMatch[1];
         }
-    }
 
-    // Parse customer card: "Thẻ KH: xxx"
-    var cardMatch = rowStr.match(/Thẻ KH[:\s]*\s*([^|]*)/i);
-    if (cardMatch) {
-        var card = cardMatch[1].trim();
-        if (card && card !== '') invoice.customerCard = card;
+        // Parse cashier: "Thu ngân: THU NGÂN"
+        if (cell.indexOf('Thu ngân') !== -1 || cell.indexOf('Thu Ngân') !== -1) {
+            var colonIdx = cell.indexOf(':');
+            if (colonIdx !== -1) {
+                var val = cell.substring(colonIdx + 1).trim();
+                if (val) invoice.cashier = val;
+            }
+        }
+
+        // Parse server: "Phục vụ: Nguyễn Văn Hoà"
+        if (cell.indexOf('Phục vụ') !== -1 || cell.indexOf('phục vụ') !== -1) {
+            var colonIdx = cell.indexOf(':');
+            if (colonIdx !== -1) {
+                var val = cell.substring(colonIdx + 1).trim();
+                if (val) invoice.server = val;
+            }
+        }
+
+        // Parse table: "Bàn: A.18"
+        if (cell.indexOf('Bàn') !== -1 && cell.indexOf(':') !== -1) {
+            var colonIdx = cell.indexOf(':');
+            if (colonIdx !== -1) {
+                var val = cell.substring(colonIdx + 1).trim();
+                if (val) invoice.table = val;
+            }
+        }
+
+        // Parse guest count: "Số người: 3"
+        if (cell.indexOf('Số người') !== -1) {
+            var guestMatch = cell.match(/(\d+)/);
+            if (guestMatch) invoice.guestCount = guestMatch[1];
+        }
+
+        // Parse customer: "KH: tên khách"
+        if (cell.indexOf('KH:') !== -1 || cell.indexOf('KH :') !== -1) {
+            var colonIdx = cell.indexOf(':');
+            if (colonIdx !== -1) {
+                var val = cell.substring(colonIdx + 1).trim();
+                if (val) invoice.customerName = val;
+            }
+        }
+
+        // Parse phone: "ĐT: 0123456789"
+        if (cell.indexOf('ĐT') !== -1 || cell.indexOf('ĐT') !== -1) {
+            var colonIdx = cell.indexOf(':');
+            if (colonIdx !== -1) {
+                var val = cell.substring(colonIdx + 1).trim();
+                if (val && /\d/.test(val)) invoice.customerPhone = val;
+            }
+        }
     }
 }
 
 function isItemHeaderRow(row) {
     var cells = row.map(function (c) { return String(c || '').trim().toLowerCase(); });
-    // Check if row contains typical column headers
     var hasSTT = cells.indexOf('stt') !== -1;
-    var hasTenMon = cells.some(function (c) { return c.indexOf('tên món') !== -1 || c.indexOf('ten mon') !== -1 || c === 'tên hàng'; });
+    var hasTenMon = cells.some(function (c) {
+        return c.indexOf('tên món') !== -1 || c.indexOf('ten mon') !== -1 || c === 'tên hàng';
+    });
     var hasDVT = cells.some(function (c) { return c === 'đvt' || c === 'dvt'; });
     return hasSTT && (hasTenMon || hasDVT);
 }
 
 function parseItemRow(row) {
-    // CukCuk item row: STT, Tên món, ĐVT, Số lượng, Đơn giá, Tiền hàng, Tiền KM, % VAT, Thành tiền
     try {
         var item = {
             stt: parseInt(String(row[0] || '0')),
@@ -497,19 +548,19 @@ function parseItemRow(row) {
             total: parseCukCukNumber(row[8])
         };
 
-        // Validate - must have a name at minimum
         if (!item.name) return null;
 
-        // If amount is 0 but we have qty and price, calculate
+        // Calculate amount if missing
         if (item.amount === 0 && item.quantity > 0 && item.unitPrice > 0) {
             item.amount = item.quantity * item.unitPrice;
         }
 
-        // If total is 0, calculate
+        // Calculate total if missing
         if (item.total === 0 && item.amount > 0) {
-            item.total = item.amount - item.discount;
+            var afterDiscount = item.amount - item.discount;
+            item.total = afterDiscount;
             if (item.vatPercent > 0) {
-                item.total += Math.round((item.amount - item.discount) * item.vatPercent / 100);
+                item.total += Math.round(afterDiscount * item.vatPercent / 100);
             }
         }
 
@@ -522,34 +573,24 @@ function parseItemRow(row) {
 
 function parseCukCukNumber(val) {
     if (val === null || val === undefined || val === '') return 0;
-    var str = String(val).trim();
+    
+    // If already a number, return it
+    if (typeof val === 'number') return val;
+    
+    var str = String(val).trim().replace(/"/g, '');
 
-    // Remove quotes
-    str = str.replace(/"/g, '');
-
-    // Handle Vietnamese number format: "3,00" -> 3, "3.000" -> 3000
-    // If contains comma and no dot: treat comma as decimal separator (e.g., "3,00" -> 3)
-    // If contains dot: treat dot as thousands separator (e.g., "3.000" -> 3000)
-
+    // Vietnamese number format handling
     if (str.indexOf(',') !== -1 && str.indexOf('.') === -1) {
         // Comma as decimal: "3,00" -> "3.00"
         str = str.replace(',', '.');
+    } else if (str.indexOf('.') !== -1 && str.indexOf(',') !== -1) {
+        // Both: "3.000,00" -> "3000.00"
+        str = str.replace(/\./g, '').replace(',', '.');
     } else if (str.indexOf('.') !== -1) {
-        // Dot as thousands separator: "3.000" -> "3000"
-        // But also handle "3.000,00" -> "3000.00"
-        if (str.indexOf(',') !== -1) {
-            str = str.replace(/\./g, '').replace(',', '.');
-        } else {
-            // Check if dot is thousands separator (number after dot is 3 digits)
-            var parts = str.split('.');
-            if (parts.length >= 2) {
-                var lastPart = parts[parts.length - 1];
-                if (lastPart.length === 3) {
-                    // Thousands separator
-                    str = str.replace(/\./g, '');
-                }
-                // Otherwise treat dot as decimal
-            }
+        // Dot only: check if thousands separator
+        var parts = str.split('.');
+        if (parts.length >= 2 && parts[parts.length - 1].length === 3) {
+            str = str.replace(/\./g, '');
         }
     }
 
@@ -565,20 +606,42 @@ function findNumberInRow(row) {
     return 0;
 }
 
+function parsePaymentRow(row, rowStr, invoice) {
+    var methods = [
+        { name: 'Tiền mặt', label: 'Tiền mặt' },
+        { name: 'Chuyển khoản', label: 'Chuyển khoản' },
+        { name: 'Thẻ', label: 'Thẻ' }
+    ];
+
+    methods.forEach(function (m) {
+        if (rowStr.indexOf(m.name + ':') !== -1 || rowStr.indexOf(m.name + ' :') !== -1) {
+            var amount = extractPaymentAmount(row, m.name);
+            if (amount > 0) {
+                // Avoid duplicates
+                var exists = invoice.paymentMethods.some(function (p) { return p.method === m.label; });
+                if (!exists) {
+                    invoice.paymentMethods.push({ method: m.label, amount: amount });
+                }
+            }
+        }
+    });
+}
+
 function extractPaymentAmount(row, methodName) {
-    var foundMethod = false;
     for (var i = 0; i < row.length; i++) {
         var cell = String(row[i] || '').trim();
-        if (cell.indexOf(methodName) !== -1) {
-            foundMethod = true;
-        }
-        if (foundMethod) {
-            var val = parseCukCukNumber(row[i]);
-            if (val > 0) return val;
-            // Also check next cell
-            if (i + 1 < row.length) {
-                val = parseCukCukNumber(row[i + 1]);
+        if (cell.indexOf(methodName + ':') !== -1 || cell.indexOf(methodName + ' :') !== -1) {
+            // Check this cell for embedded number after ':'
+            var colonIdx = cell.indexOf(':');
+            if (colonIdx !== -1) {
+                var afterColon = cell.substring(colonIdx + 1).trim();
+                var val = parseCukCukNumber(afterColon);
                 if (val > 0) return val;
+            }
+            // Check next cells
+            for (var j = i + 1; j < Math.min(i + 3, row.length); j++) {
+                var v = parseCukCukNumber(row[j]);
+                if (v > 0) return v;
             }
         }
     }
@@ -586,18 +649,14 @@ function extractPaymentAmount(row, methodName) {
 }
 
 function isEndOfInvoice(data, currentRow, startRow) {
-    // End of invoice if:
-    // 1. We're at the end of data
     if (currentRow >= data.length - 1) return true;
 
-    // 2. We've gone at least 8 rows into the invoice and hit 2+ consecutive empty rows
     if (currentRow - startRow > 8) {
         var currentEmpty = isRowEmpty(data[currentRow]);
         var nextEmpty = currentRow + 1 < data.length ? isRowEmpty(data[currentRow + 1]) : true;
         if (currentEmpty && nextEmpty) return true;
     }
 
-    // 3. Next row starts a new invoice
     if (currentRow + 1 < data.length) {
         var nextFirst = String(data[currentRow + 1][0] || '').trim();
         if (nextFirst === 'Hóa đơn' || nextFirst === 'Hoá đơn') return true;
@@ -611,16 +670,6 @@ function isRowEmpty(row) {
     return row.every(function (c) { return String(c || '').trim() === ''; });
 }
 
-function tryParseWholeSheet(data, fileName, sheetName) {
-    // Fallback: try to parse the entire sheet as one invoice
-    var invoice = parseInvoiceBlock(data, 0);
-    if (invoice) {
-        invoice.fileName = fileName;
-        invoice.sheetName = sheetName;
-    }
-    return invoice;
-}
-
 // ============================================
 // CukCuk to Sapo Converter
 // ============================================
@@ -631,9 +680,10 @@ function convertToSapo(invoices) {
         var paymentMethod = determinePaymentMethod(invoice);
 
         invoice.items.forEach(function (item, itemIndex) {
-            var row = new Array(36).fill('');
+            var row = new Array(TOTAL_COLS);
+            for (var i = 0; i < TOTAL_COLS; i++) row[i] = '';
 
-            // First item row gets the invoice header info
+            // First item row gets invoice header info
             if (itemIndex === 0) {
                 row[SAPO_COL.MA_CHUNG_TU] = invoice.number;
                 row[SAPO_COL.NGUOI_MUA] = invoice.customerName || '';
@@ -643,7 +693,7 @@ function convertToSapo(invoices) {
                 row[SAPO_COL.TY_GIA] = 1;
             }
 
-            // Item info (always filled)
+            // Product info (always filled)
             row[SAPO_COL.TINH_CHAT] = 'Hàng hóa dịch vụ';
             row[SAPO_COL.TEN_HANG] = item.name;
             row[SAPO_COL.DVT] = item.unit;
@@ -651,7 +701,7 @@ function convertToSapo(invoices) {
             row[SAPO_COL.DON_GIA] = item.unitPrice;
             row[SAPO_COL.THANH_TIEN] = item.amount;
 
-            // Discount
+            // Discount per item
             if (item.discount > 0) {
                 row[SAPO_COL.CK_SP_GIA_TRI] = item.discount;
                 row[SAPO_COL.TIEN_CHIET_KHAU] = item.discount;
@@ -686,13 +736,170 @@ function determinePaymentMethod(invoice) {
         if (method === 'Chuyển khoản') return 'Chuyển khoản';
         return 'Tiền mặt';
     }
-
-    // Multiple payment methods
-    var hasCash = invoice.paymentMethods.some(function (p) { return p.method === 'Tiền mặt'; });
-    var hasTransfer = invoice.paymentMethods.some(function (p) { return p.method === 'Chuyển khoản'; });
-
-    if (hasCash && hasTransfer) return 'TM/CK';
     return 'TM/CK';
+}
+
+// ============================================
+// Export Functions
+// ============================================
+function exportToXlsx() {
+    try {
+        var wb = XLSX.utils.book_new();
+        var wsData = buildSapoSheetData();
+        var ws = XLSX.utils.aoa_to_sheet(wsData);
+
+        // Set column widths
+        ws['!cols'] = [
+            { wch: 12 },  // A - Ký hiệu
+            { wch: 16 },  // B - Mã chứng từ
+            { wch: 10 },  // C - Mã khách
+            { wch: 16 },  // D - MST
+            { wch: 25 },  // E - Tên đơn vị
+            { wch: 30 },  // F - Địa chỉ
+            { wch: 20 },  // G - Người mua
+            { wch: 14 },  // H - SĐT
+            { wch: 20 },  // I - Email
+            { wch: 20 },  // J - Người nhận
+            { wch: 20 },  // K - Email nhận
+            { wch: 15 },  // L - HTTT
+            { wch: 15 },  // M - Ngân hàng
+            { wch: 16 },  // N - STK
+            { wch: 8 },   // O - Loại tiền
+            { wch: 8 },   // P - Tỷ giá
+            { wch: 10 },  // Q - CK giá trị
+            { wch: 6 },   // R - CK %
+            { wch: 8 },   // S - VAT HĐ
+            { wch: 16 },  // T - Tính chất
+            { wch: 12 },  // U - Mã hàng
+            { wch: 30 },  // V - Tên HH
+            { wch: 8 },   // W - ĐVT
+            { wch: 8 },   // X - SL
+            { wch: 12 },  // Y - Đơn giá
+            { wch: 12 },  // Z - Thành tiền
+            { wch: 10 },  // AA - CK/SP GiaTri
+            { wch: 6 },   // AB - CK/SP %
+            { wch: 12 },  // AC - Tiền CK
+            { wch: 8 },   // AD - %Thuế
+            { wch: 14 },  // AE - TT đã trừ CK
+            { wch: 12 },  // AF - Thuế giảm
+            { wch: 8 },   // AG - VAT%
+            { wch: 12 },  // AH - Tiền VAT
+            { wch: 14 }   // AI - Tổng tiền
+        ];
+
+        // Set merge cells - match exactly with Sapo template
+        ws['!merges'] = [
+            // Row 1 group headers
+            { s: { r: 0, c: 0 }, e: { r: 2, c: 0 } },   // A1:A3 - Ký hiệu
+            { s: { r: 0, c: 1 }, e: { r: 2, c: 1 } },   // B1:B3 - Mã chứng từ
+            { s: { r: 0, c: 2 }, e: { r: 0, c: 8 } },   // C1:I1 - Thông tin người mua
+            { s: { r: 0, c: 9 }, e: { r: 0, c: 10 } },  // J1:K1 - Thông tin người nhận
+            { s: { r: 0, c: 11 }, e: { r: 0, c: 15 } }, // L1:P1 - Thông tin giao dịch
+            { s: { r: 0, c: 16 }, e: { r: 1, c: 17 } }, // Q1:R2 - Chiết khấu cả HĐ
+            { s: { r: 0, c: 18 }, e: { r: 2, c: 18 } }, // S1:S3 - Thuế GTGT cả HĐ
+            { s: { r: 0, c: 19 }, e: { r: 0, c: 34 } }, // T1:AI1 - Thông tin HH, DV
+            // Row 2 sub-headers that merge with row 3
+            { s: { r: 1, c: 2 }, e: { r: 2, c: 2 } },   // C2:C3 - Mã khách
+            { s: { r: 1, c: 3 }, e: { r: 2, c: 3 } },   // D2:D3
+            { s: { r: 1, c: 4 }, e: { r: 2, c: 4 } },   // E2:E3
+            { s: { r: 1, c: 5 }, e: { r: 2, c: 5 } },   // F2:F3
+            { s: { r: 1, c: 6 }, e: { r: 2, c: 6 } },   // G2:G3
+            { s: { r: 1, c: 7 }, e: { r: 2, c: 7 } },   // H2:H3
+            { s: { r: 1, c: 8 }, e: { r: 2, c: 8 } },   // I2:I3
+            { s: { r: 1, c: 9 }, e: { r: 2, c: 9 } },   // J2:J3
+            { s: { r: 1, c: 10 }, e: { r: 2, c: 10 } }, // K2:K3
+            { s: { r: 1, c: 11 }, e: { r: 2, c: 11 } }, // L2:L3
+            { s: { r: 1, c: 12 }, e: { r: 2, c: 12 } }, // M2:M3
+            { s: { r: 1, c: 13 }, e: { r: 2, c: 13 } }, // N2:N3
+            { s: { r: 1, c: 14 }, e: { r: 2, c: 14 } }, // O2:O3
+            { s: { r: 1, c: 15 }, e: { r: 2, c: 15 } }, // P2:P3
+            { s: { r: 1, c: 19 }, e: { r: 2, c: 19 } }, // T2:T3
+            { s: { r: 1, c: 20 }, e: { r: 2, c: 20 } }, // U2:U3
+            { s: { r: 1, c: 21 }, e: { r: 2, c: 21 } }, // V2:V3
+            { s: { r: 1, c: 22 }, e: { r: 2, c: 22 } }, // W2:W3
+            { s: { r: 1, c: 23 }, e: { r: 2, c: 23 } }, // X2:X3
+            { s: { r: 1, c: 24 }, e: { r: 2, c: 24 } }, // Y2:Y3
+            { s: { r: 1, c: 25 }, e: { r: 2, c: 25 } }, // Z2:Z3
+            { s: { r: 1, c: 26 }, e: { r: 1, c: 27 } }, // AA2:AB2 - Chiết khấu/SP
+            { s: { r: 1, c: 28 }, e: { r: 2, c: 28 } }, // AC2:AC3
+            { s: { r: 1, c: 29 }, e: { r: 2, c: 29 } }, // AD2:AD3
+            { s: { r: 1, c: 30 }, e: { r: 2, c: 30 } }, // AE2:AE3
+            { s: { r: 1, c: 31 }, e: { r: 2, c: 31 } }, // AF2:AF3
+            { s: { r: 1, c: 32 }, e: { r: 2, c: 32 } }, // AG2:AG3
+            { s: { r: 1, c: 33 }, e: { r: 2, c: 33 } }, // AH2:AH3
+            { s: { r: 1, c: 34 }, e: { r: 2, c: 34 } }  // AI2:AI3
+        ];
+
+        XLSX.utils.book_append_sheet(wb, ws, 'Sapo_Import');
+
+        var now = new Date();
+        var dateStr = now.getFullYear().toString() +
+            ('0' + (now.getMonth() + 1)).slice(-2) +
+            ('0' + now.getDate()).slice(-2) +
+            '_' + ('0' + now.getHours()).slice(-2) +
+            ('0' + now.getMinutes()).slice(-2);
+        var fileName = 'Sapo_Import_' + dateStr + '.xlsx';
+
+        XLSX.writeFile(wb, fileName);
+        showToast('Đã xuất file ' + fileName + ' thành công!', 'success');
+    } catch (err) {
+        console.error('Export error:', err);
+        showToast('Lỗi xuất file: ' + err.message, 'error');
+    }
+}
+
+function exportToCsv() {
+    try {
+        var wsData = buildSapoSheetData();
+        var csvContent = wsData.map(function (row) {
+            return row.map(function (cell) {
+                var str = String(cell === null || cell === undefined ? '' : cell);
+                if (str.indexOf(',') !== -1 || str.indexOf('"') !== -1 || str.indexOf('\n') !== -1) {
+                    str = '"' + str.replace(/"/g, '""') + '"';
+                }
+                return str;
+            }).join(',');
+        }).join('\r\n');
+
+        var blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8' });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+
+        var now = new Date();
+        var dateStr = now.getFullYear().toString() +
+            ('0' + (now.getMonth() + 1)).slice(-2) +
+            ('0' + now.getDate()).slice(-2) +
+            '_' + ('0' + now.getHours()).slice(-2) +
+            ('0' + now.getMinutes()).slice(-2);
+
+        a.href = url;
+        a.download = 'Sapo_Import_' + dateStr + '.csv';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        showToast('Đã xuất file CSV thành công!', 'success');
+    } catch (err) {
+        console.error('CSV export error:', err);
+        showToast('Lỗi xuất file CSV: ' + err.message, 'error');
+    }
+}
+
+function buildSapoSheetData() {
+    var data = [];
+
+    // 3 header rows
+    data.push(SAPO_HEADERS.row1.slice());
+    data.push(SAPO_HEADERS.row2.slice());
+    data.push(SAPO_HEADERS.row3.slice());
+
+    // Data rows
+    AppState.sapoData.forEach(function (row) {
+        data.push(row.slice());
+    });
+
+    return data;
 }
 
 // ============================================
@@ -709,8 +916,7 @@ function updateFileList() {
             '<div class="file-item-icon">' +
             '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">' +
             '<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>' +
-            '<polyline points="14,2 14,8 20,8"/>' +
-            '</svg></div>' +
+            '<polyline points="14,2 14,8 20,8"/></svg></div>' +
             '<div class="file-item-info">' +
             '<div class="file-item-name">' + escapeHtml(file.name) + '</div>' +
             '<div class="file-item-meta">' +
@@ -731,24 +937,14 @@ function renderCukCukPreview() {
     var thead = document.getElementById('cukcukTableHead');
     var tbody = document.getElementById('cukcukTableBody');
 
-    // Header
     thead.innerHTML =
         '<tr>' +
-        '<th>Hóa đơn</th>' +
-        '<th>Ngày</th>' +
-        '<th>HTTT</th>' +
-        '<th>STT</th>' +
-        '<th>Tên món</th>' +
-        '<th>ĐVT</th>' +
-        '<th>SL</th>' +
-        '<th class="amount-cell">Đơn giá</th>' +
-        '<th class="amount-cell">Tiền hàng</th>' +
-        '<th class="amount-cell">Tiền KM</th>' +
-        '<th>%VAT</th>' +
-        '<th class="amount-cell">Thành tiền</th>' +
-        '</tr>';
+        '<th>Hóa đơn</th><th>Ngày</th><th>HTTT</th>' +
+        '<th>STT</th><th>Tên món</th><th>ĐVT</th><th>SL</th>' +
+        '<th class="amount-cell">Đơn giá</th><th class="amount-cell">Tiền hàng</th>' +
+        '<th class="amount-cell">Tiền KM</th><th>%VAT</th>' +
+        '<th class="amount-cell">Thành tiền</th></tr>';
 
-    // Body
     tbody.innerHTML = '';
     var totalInvoices = AppState.invoices.length;
     var totalItems = 0;
@@ -782,7 +978,6 @@ function renderCukCukPreview() {
         });
     });
 
-    // Update stats
     document.getElementById('previewStats').innerHTML =
         '<span class="stat-badge"><strong>' + totalInvoices + '</strong> hóa đơn</span>' +
         '<span class="stat-badge"><strong>' + totalItems + '</strong> dòng</span>' +
@@ -793,10 +988,9 @@ function renderSapoPreview() {
     var thead = document.getElementById('sapoTableHead');
     var tbody = document.getElementById('sapoTableBody');
 
-    // Build 3-row header
     var headerHtml = '';
 
-    // Row 1
+    // Row 1 - group headers
     headerHtml += '<tr class="header-row-1">';
     var row1Spans = [
         { text: 'Ký hiệu*', cols: 1 },
@@ -813,7 +1007,7 @@ function renderSapoPreview() {
     });
     headerHtml += '</tr>';
 
-    // Row 2 - detailed column names
+    // Row 2 - column names
     headerHtml += '<tr class="header-row-2">';
     SAPO_HEADERS.row2.forEach(function (h) {
         headerHtml += '<th>' + h + '</th>';
@@ -822,21 +1016,21 @@ function renderSapoPreview() {
 
     thead.innerHTML = headerHtml;
 
-    // Body
+    // Data rows
     tbody.innerHTML = '';
     AppState.sapoData.forEach(function (row) {
         var tr = document.createElement('tr');
         if (row[SAPO_COL.MA_CHUNG_TU]) tr.className = 'invoice-header-row';
 
         var html = '';
+        var amountCols = [24, 25, 26, 28, 30, 33, 34];
         row.forEach(function (cell, colIdx) {
-            var cls = '';
-            if ([25, 26, 27, 29, 31, 34, 35].indexOf(colIdx) !== -1) cls = ' class="amount-cell"';
+            var cls = amountCols.indexOf(colIdx) !== -1 ? ' class="amount-cell"' : '';
             var displayVal = cell;
             if (typeof cell === 'number' && cell > 0) {
-                if ([24].indexOf(colIdx) !== -1) {
+                if (colIdx === 23) {
                     displayVal = formatQuantity(cell);
-                } else if ([25, 26, 27, 29, 31, 34, 35].indexOf(colIdx) !== -1) {
+                } else if (amountCols.indexOf(colIdx) !== -1) {
                     displayVal = formatNumber(cell);
                 }
             }
@@ -868,155 +1062,12 @@ function updateExportDetails() {
 }
 
 // ============================================
-// Export Functions
-// ============================================
-function exportToXlsx() {
-    try {
-        var wb = XLSX.utils.book_new();
-        var wsData = buildSapoSheetData();
-        var ws = XLSX.utils.aoa_to_sheet(wsData);
-
-        // Set column widths
-        ws['!cols'] = [
-            { wch: 12 }, // Ký hiệu
-            { wch: 16 }, // Mã chứng từ
-            { wch: 10 }, // Mã khách
-            { wch: 16 }, // MST
-            { wch: 25 }, // Tên đơn vị
-            { wch: 30 }, // Địa chỉ
-            { wch: 20 }, // Người mua
-            { wch: 14 }, // SĐT
-            { wch: 20 }, // Email
-            { wch: 20 }, // Người nhận
-            { wch: 20 }, // Email nhận
-            { wch: 15 }, // HTTT
-            { wch: 15 }, // Ngân hàng
-            { wch: 16 }, // STK
-            { wch: 8 },  // Loại tiền
-            { wch: 8 },  // Tỷ giá
-            { wch: 10 }, // CK giá trị
-            { wch: 6 },  // CK %
-            { wch: 8 },  // VAT HĐ
-            { wch: 3 },  // spacer
-            { wch: 16 }, // Tính chất
-            { wch: 12 }, // Mã hàng
-            { wch: 30 }, // Tên HH
-            { wch: 8 },  // ĐVT
-            { wch: 8 },  // SL
-            { wch: 12 }, // Đơn giá
-            { wch: 12 }, // Thành tiền
-            { wch: 10 }, // CK/SP GiaTri
-            { wch: 6 },  // CK/SP %
-            { wch: 12 }, // Tiền CK
-            { wch: 8 },  // %Thuế
-            { wch: 14 }, // TT đã trừ CK
-            { wch: 12 }, // Thuế giảm
-            { wch: 8 },  // VAT%
-            { wch: 12 }, // Tiền VAT
-            { wch: 14 }  // Tổng tiền
-        ];
-
-        // Merge cells for header row 1
-        ws['!merges'] = [
-            // Thông tin người mua: C1:I1
-            { s: { r: 0, c: 2 }, e: { r: 0, c: 8 } },
-            // Thông tin người nhận: J1:K1
-            { s: { r: 0, c: 9 }, e: { r: 0, c: 10 } },
-            // Thông tin giao dịch: L1:P1
-            { s: { r: 0, c: 11 }, e: { r: 0, c: 15 } },
-            // Chiết khấu cả HĐ: Q1:R1
-            { s: { r: 0, c: 16 }, e: { r: 0, c: 17 } },
-            // Thông tin HH, DV: T1:AJ1
-            { s: { r: 0, c: 19 }, e: { r: 0, c: 35 } },
-            // Chiết khấu/SP header: AB2:AC2
-            { s: { r: 1, c: 27 }, e: { r: 1, c: 28 } }
-        ];
-
-        XLSX.utils.book_append_sheet(wb, ws, 'Sapo_Import');
-
-        var now = new Date();
-        var dateStr = now.getFullYear().toString() +
-            ('0' + (now.getMonth() + 1)).slice(-2) +
-            ('0' + now.getDate()).slice(-2) +
-            '_' + ('0' + now.getHours()).slice(-2) +
-            ('0' + now.getMinutes()).slice(-2);
-        var fileName = 'Sapo_Import_' + dateStr + '.xlsx';
-
-        XLSX.writeFile(wb, fileName);
-        showToast('Đã xuất file ' + fileName + ' thành công!', 'success');
-    } catch (err) {
-        console.error('Export error:', err);
-        showToast('Lỗi xuất file: ' + err.message, 'error');
-    }
-}
-
-function exportToCsv() {
-    try {
-        var wsData = buildSapoSheetData();
-        var csvContent = wsData.map(function (row) {
-            return row.map(function (cell) {
-                var str = String(cell === null || cell === undefined ? '' : cell);
-                // Escape quotes and wrap in quotes if contains comma, quote or newline
-                if (str.indexOf(',') !== -1 || str.indexOf('"') !== -1 || str.indexOf('\n') !== -1) {
-                    str = '"' + str.replace(/"/g, '""') + '"';
-                }
-                return str;
-            }).join(',');
-        }).join('\r\n');
-
-        // Add BOM for UTF-8
-        var blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8' });
-        var url = URL.createObjectURL(blob);
-        var a = document.createElement('a');
-
-        var now = new Date();
-        var dateStr = now.getFullYear().toString() +
-            ('0' + (now.getMonth() + 1)).slice(-2) +
-            ('0' + now.getDate()).slice(-2) +
-            '_' + ('0' + now.getHours()).slice(-2) +
-            ('0' + now.getMinutes()).slice(-2);
-
-        a.href = url;
-        a.download = 'Sapo_Import_' + dateStr + '.csv';
-        a.click();
-        URL.revokeObjectURL(url);
-
-        showToast('Đã xuất file CSV thành công!', 'success');
-    } catch (err) {
-        console.error('CSV export error:', err);
-        showToast('Lỗi xuất file CSV: ' + err.message, 'error');
-    }
-}
-
-function buildSapoSheetData() {
-    var data = [];
-
-    // 3 header rows
-    data.push(SAPO_HEADERS.row1);
-    data.push(SAPO_HEADERS.row2);
-    data.push(SAPO_HEADERS.row3);
-
-    // Data rows
-    AppState.sapoData.forEach(function (row) {
-        data.push(row.slice());
-    });
-
-    return data;
-}
-
-// ============================================
 // Tab Management
 // ============================================
 function switchTab(tabId) {
     AppState.currentTab = tabId;
-
-    document.querySelectorAll('.tab').forEach(function (t) {
-        t.classList.remove('active');
-    });
-    document.querySelectorAll('.tab-content').forEach(function (c) {
-        c.style.display = 'none';
-    });
-
+    document.querySelectorAll('.tab').forEach(function (t) { t.classList.remove('active'); });
+    document.querySelectorAll('.tab-content').forEach(function (c) { c.style.display = 'none'; });
     document.querySelector('[data-tab="' + tabId + '"]').classList.add('active');
     document.getElementById(tabId).style.display = 'block';
 }
@@ -1028,22 +1079,13 @@ function setStep(step) {
     for (var i = 1; i <= 3; i++) {
         var el = document.getElementById('step' + i + '-indicator');
         el.classList.remove('active', 'completed');
-
-        if (i < step) {
-            el.classList.add('completed');
-        } else if (i === step) {
-            el.classList.add('active');
-        }
+        if (i < step) el.classList.add('completed');
+        else if (i === step) el.classList.add('active');
     }
-
-    // Update step lines
     var lines = document.querySelectorAll('.step-line');
     lines.forEach(function (line, idx) {
-        if (idx < step - 1) {
-            line.classList.add('completed');
-        } else {
-            line.classList.remove('completed');
-        }
+        if (idx < step - 1) line.classList.add('completed');
+        else line.classList.remove('completed');
     });
 }
 
@@ -1057,7 +1099,6 @@ function formatNumber(num) {
 
 function formatQuantity(num) {
     if (num === 0) return '0';
-    // Show decimal only if fractional
     if (num % 1 === 0) return num.toString();
     return num.toFixed(2).replace('.', ',');
 }
@@ -1088,41 +1129,29 @@ function showToast(message, type) {
     toast.textContent = icon + message;
     toast.className = 'toast ' + (type || 'info');
     toast.style.display = 'flex';
-
-    // Reset animation
     toast.classList.remove('toast-out');
 
     clearTimeout(toast._timeout);
     toast._timeout = setTimeout(function () {
         toast.classList.add('toast-out');
-        setTimeout(function () {
-            toast.style.display = 'none';
-        }, 300);
+        setTimeout(function () { toast.style.display = 'none'; }, 300);
     }, 3000);
 }
 
 function removeFile(index) {
     var removedFile = AppState.files[index];
-
-    // Remove invoices from this file/sheet
     AppState.invoices = AppState.invoices.filter(function (inv) {
         return !(inv.fileName === removedFile.name && inv.sheetName === removedFile.sheet);
     });
-
     AppState.files.splice(index, 1);
 
-    if (AppState.files.length === 0) {
-        resetApp();
-        return;
-    }
+    if (AppState.files.length === 0) { resetApp(); return; }
 
-    // Reconvert
     AppState.sapoData = convertToSapo(AppState.invoices);
     updateFileList();
     renderCukCukPreview();
     renderSapoPreview();
     updateExportDetails();
-
     showToast('Đã xóa file ' + removedFile.name, 'info');
 }
 
@@ -1130,14 +1159,11 @@ function resetApp() {
     AppState.files = [];
     AppState.invoices = [];
     AppState.sapoData = [];
-
     document.getElementById('fileList-section').style.display = 'none';
     document.getElementById('step2-section').style.display = 'none';
     document.getElementById('step3-section').style.display = 'none';
-
     document.getElementById('fileInput').value = '';
     document.getElementById('fileInputMore').value = '';
-
     setStep(1);
     switchTab('cukcuk-preview');
 }
